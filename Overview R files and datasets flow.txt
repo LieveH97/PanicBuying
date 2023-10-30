@@ -1,0 +1,18 @@
+C:\PhD KU Leuven\OneDrive - KU Leuven\Projects_Github\RetailCOVID19\R_Files\Preparation\toilet paper inventory
+"prepare_INV_toilet paper.R"
+-> NL_purch_toiletpaper.RData
+
+
+C:\PhD KU Leuven\OneDrive - KU Leuven\Projects_Github\RetailCOVID19\R_Files\INC-QUANT model\toilet paper
+"promo index weights.R"
+-> prepared_purchasedata_NL.RData
+
+
+C:\PhD KU Leuven\OneDrive - KU Leuven\Projects_Github\RetailCOVID19\R_Files\INC-QUANT model\toilet paper
+"moderators.R"
+-> prepared_purchasedata_NL_final.RData
+
+
+C:\PhD KU Leuven\OneDrive - KU Leuven\Projects_Github\RetailCOVID19\R_Files\INC-QUANT model\toilet paper
+"inc_quant_toilet paper.R"
+-> FullData_with_moderators_and_labels.RData

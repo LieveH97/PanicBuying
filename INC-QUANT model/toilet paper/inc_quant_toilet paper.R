@@ -1,0 +1,663 @@
+##############################################
+###                                        ###
+###       incidence-quantity model         ###
+###                                        ###
+##############################################
+
+rm(list=ls())
+
+### Relative path setting - adapting to the operating computer
+getwd()
+if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+  project_path <- "C:/Work at KU Leuven/Projects/RetailCOVID19"
+}else if (Sys.info()["nodename"] == "LAPTOP-KBL77S8J"){
+  project_path <- "C:/Users/lieve/Documents/GitHub/RetailCOVID19"
+}else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+  project_path <- "C:/PhD KU Leuven/OneDrive - KU Leuven/Projects_Github/RetailCOVID19"
+}
+setwd(project_path)
+
+
+location <- "local"
+
+### set path to data files
+if (location == "server") {
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data"
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data" }
+} else if (location == "local") { 
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- ""
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "C:/PhD KU Leuven/AiMark" } 
+}
+
+### set path to save
+if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+  save_path <- "X:/Retailing_Group/PhD Lieve/Project 1"
+}else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+  save_path <- "X:/Retailing_Group/PhD Lieve/Project 1"
+}
+
+#load libraries - you have to install the packages before running the code!
+list.of.packages <- c("plyr","tidyr","ggplot2", "tidyverse", "zoo", "readxl", "car", "sampleSelection", "stargazer", "haven","expss", "plm", "sandwich", "lmtest")
+
+#Install package if they are not installes yet
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+# Load packages
+lapply(list.of.packages, require, character.only = TRUE)
+
+
+# create country list
+country_list <- c("NL","BE","GE","FR","UK")
+
+
+# set country
+country <- country_list[country_list=="NL"]
+
+
+
+
+
+
+
+
+
+###################################################################################################################################################
+#                                                       CREATING FULL DATA SET
+###################################################################################################################################################
+
+###################################################################
+# loading prepared Price and Promo Index and filtered purchase data
+###################################################################
+
+load(paste(project_path,"/R_files/INC-QUANT model/toilet paper/PricePromoIndex_NL.RData",sep=""))
+PricePromoIndex <- final_PricePromoIndex
+rm(final_PricePromoIndex)
+load(paste(project_path,"/R_files/INC-QUANT model/toilet paper/prepared_purchasedata_NL_final",sep=""))
+
+all.dates <- unique(TP_purch$Date_of_purchase)
+all.households <- unique(TP_purch$Panelist)
+all.BSBRetailers <- unique(TP_purch$BSBRetailer)
+estimation.dates <- seq.Date(from=as.Date("2019-01-01"), to=as.Date("2020-04-30"), by="days")
+
+# for each household, we no longer make a distinction between different products; just whether they bought and if so, how many rolls
+TP_purch <- ddply(TP_purch, .(Date_of_purchase, Panelist), summarise, Total_volume_sales = sum(Total_volume_sales))
+
+# based on moderators, 243 households excluded -> exclude also from PricePromoIndex dataframe, as this is basis for FullData
+PricePromoIndex <- PricePromoIndex[PricePromoIndex$Household %in% all.households,]
+
+
+########################
+# exclusion restrictions
+########################
+
+# already prepared as part of the moderator "Familiarity"
+   # incidence model: grand mean-centered average interpurchase time of household in 2018 (in days)
+   # quantity model: grand mean-centered average purchase quantity of household in 2018 (in rolls)
+
+
+##########################
+# CREATE THE FINAL DATASET
+##########################
+
+# dimensions: #dates X #households
+# for every date, for every households: do they buy, and if yes, how much
+FullData <- PricePromoIndex
+rm(PricePromoIndex)
+
+
+### PURCHASES ###
+# include purchase info
+FullData <- merge(FullData, TP_purch, by.x=c("Date","Household"), by.y=c("Date_of_purchase","Panelist"), all.x=T)
+rm(TP_purch)
+
+# purchase: yes or no
+FullData$PurchaseFlag <- ifelse(!is.na(FullData$Total_volume_sales), 1, 0)
+
+### ESTIMATION PERIOD ###
+FullData <- FullData[FullData$Date %in% estimation.dates,]
+
+
+### TIME DUMMIES ###
+library(lubridate)
+# day of the week dummies
+FullData$Weekday <- wday(FullData$Date, week_start = 1)
+FullData$Weekday <- factor(FullData$Weekday)
+
+# week of the year dummies
+FullData$Week <- week(FullData$Date)
+FullData$Week <- factor(FullData$Week)
+
+# month of the year dummies
+FullData$Month <- month(FullData$Date)
+FullData$Month <- factor(FullData$Month)
+
+# quarter of the year dummies
+FullData$Quarter <- quarter(FullData$Date)
+FullData$Quarter <- factor(FullData$Quarter)
+
+# year
+FullData$Year <- year(FullData$Date)
+FullData$Year <- factor(FullData$Year)
+
+
+### INVENTORY ###
+load(paste(project_path,"/R_files/Preparation/toilet paper inventory/",country,"_INV_toiletpaper.RData",sep=""))
+FullData <- merge(FullData, Inv, by.x=c("Date","Household"), by.y=c("Date", "ID"))
+rm(Inv)
+# mean centering inventory with household mean of 2019 and 2020
+FullData <- FullData %>% group_by(Household) %>% mutate(meanINV = mean(Inv))
+FullData$HHInv <- FullData$Inv - FullData$meanINV
+col_remove <- c("meanINV")
+FullData <- FullData[,!colnames(FullData) %in% col_remove]
+rm(col_remove)
+
+
+### PANIC INDEX ###
+panic <- data.frame(Date = estimation.dates)
+temp <- read_dta(file="C:/PhD KU Leuven/OneDrive - KU Leuven/Projects_Personal/Project 1 - Stockpiling vs Panic Buying/Panic_COVID19_Data/Panic_Index_Data.dta")
+temp <- temp[temp$geoCode == "NL",]
+temp$Date <- as.Date(temp$time)
+panic <- merge(panic, temp, by="Date", all.x=T)
+panic <- panic[, c("Date", "panic_index")]
+rm(temp)
+# NEW VERSION: impute 2019 and scale between 0 and 1 (like PromoIndex)
+# calculate mean panic index of January 2020
+panic_jan2020 <- mean(panic$panic_index[panic$Date %in% seq.Date(from=as.Date("2020-01-01"), to=as.Date("2020-01-31"), by="days")])
+# for 2019 (no panic index available): impute mean panic index of January 2020
+panic$panic_index[is.na(panic$panic_index)] <- panic_jan2020
+rm(panic_jan2020)
+# rescale panic index to range between 0 and 1
+min_panic <- min(panic$panic_index)
+max_panic <- max(panic$panic_index)
+panic$panic_index_rescaled <- (panic$panic_index - min_panic) / (max_panic - min_panic)
+summary(panic$panic_index_rescaled)
+# add to FullData
+FullData <- merge(FullData, panic, by="Date", all = T)
+FullData$PanicIndex <- FullData$panic_index_rescaled
+rm(list=c('panic','min_panic','max_panic'))
+col_remove <- c("panic_index", "panic_index_rescaled")
+FullData <- FullData[,!colnames(FullData) %in% col_remove]
+rm(col_remove)
+
+
+### MODERATORS ###
+load(paste(project_path,"/R_files/INC-QUANT model/toilet paper/prepared_moderators_NL",sep=""))
+FullData <- merge(FullData, moderators, by.x="Household", by.y="Panelist", all.x=T)
+rm(moderators)
+col_remove <- c("TP_volume", "Promo_value","Promo_volume","PL_value","PL_volume")
+FullData <- FullData[,!colnames(FullData) %in% col_remove]
+rm(col_remove)
+
+# to speed up estimating different versions of the Heckamn selection model
+save(FullData, file=paste(project_path,"/R_files/INC-QUANT model/toilet paper/FullData_with_moderators.RData",sep=""))
+
+
+### RENAME THE VARIABLES FOR CLEAR INTERPRETATION ###
+colnames(FullData)[which(names(FullData) == "ShelfPriceIndex")] <- "PriceIndex"
+colnames(FullData)[which(names(FullData) == "HHInv")] <- "HouseholdInventory"
+    colnames(FullData)[which(names(FullData) == "Inv")] <- "HouseholdInventory_nonMC"
+colnames(FullData)[which(names(FullData) == "AvgIPT_MC")] <- "Average_IPT"
+    colnames(FullData)[which(names(FullData) == "AvgIPT")] <- "Average_IPT_nonMC"
+colnames(FullData)[which(names(FullData) == "AvgQ_MC")] <- "Average_Q"
+    colnames(FullData)[which(names(FullData) == "AvgQ")] <- "Average_Q_nonMC"
+colnames(FullData)[which(names(FullData) == "Promo.sens_volume_MC")] <- "PromoSensitivity"    
+    colnames(FullData)[which(names(FullData) == "Promo.sens_volume")] <- "PromoSensitivity_nonMC"
+colnames(FullData)[which(names(FullData) == "PL.share_volume_MC")] <- "PLShare"
+    colnames(FullData)[which(names(FullData) == "PL.share_volume")] <- "PLShare_nonMC"
+colnames(FullData)[which(names(FullData) == "BrandSupport_MC")] <- "BrandLoyalty"
+    colnames(FullData)[which(names(FullData) == "BrandSupport")] <- "BrandLoyalty_nonMC"    
+colnames(FullData)[which(names(FullData) == "Income_above_median")] <- "Income"
+colnames(FullData)[which(names(FullData) == "Weekday")] <- "Day_of_week"
+colnames(FullData)[which(names(FullData) == "Household_size")] <- "HouseholdSize"
+
+
+### USE LABELS TO CLARIFY OPERATIONALIZATION ###
+FullData <- apply_labels(FullData, 
+                         PriceIndex = "Weighted price index, based on shelf prices", 
+                         RegularPriceIndex = "Weighted price index, based on (derived) regular prices (95th percentile of year-store)",
+                         RegularPriceIndex_Q = "Weighted price index, based on (derived) regular prices (95th percentile of quarter-store)", 
+                         Total_volume_sales = "Number of toilet paper rolls bought",
+                         PurchaseFlag = "1 if purchase was made, 0 otherwise",
+                         HouseholdInventory_nonMC = "Daily household inventory, with rolling average daily consumption rate (see prepare_INV_toilet_paper script)",
+                         HouseholdInventory = "Daily household inventory, mean-centered within household (with mean of 2019-2020), with rolling average daily consumption rate (see prepare_INV_toilet_paper script)",
+                         Total_budget = "Household's total spending in 2018 across all categories",
+                         Total_budget_MC = "Grand mean-centered (across households); Household's total spending in 2018 across all categories",
+                         Age = "Effect coded; 1 if household is head of household is older than 55, -1 otherwise",
+                         HouseholdSize = "Effect coded, 1 if household has three or more members, -1 otherwise",
+                         Income = "Effect coded; 1 if household's annual income is above NL median, -1 otherwise", 
+                         Income_dev1 = "Effect coded; 2/3 if household's annual income is in lowest 10th percentile, -1/3 otherwise",
+                         Income_dev2 = "Effect coded; 2/3 if household's annual income is in highest 10th percentile, -1/3 otherwise",
+                         Income_diff1 = "Effect coded; -1 if household's annual income is in lowest 10th percentile, 0 if in highest 10th percentile, 1 otherwise",
+                         Income_diff2 = "Effect coded, -1/2 if household's annual income is in lowest 10th percentile, 1 if in highest 10th percentile, -1/2 otherwise",
+                         TP_budget = "Household's total toilet paper spending in 2018",
+                         TP_budget_MC = "Grand mean-centered (across households); household's total toilet paper spending in 2018",
+                         SoB = "share of Total Budget in 2018 spent on toilet paper",
+                         SoB_MC = "Grand mean-centered (across households) ; share of Total Budget in 2018 spent on toilet paper",
+                         TP_trips = "Number of shopping trips where toilet paper was bought, in 2018", 
+                         Promo_trips =  "Number of shopping trips where (at least one roll of) toilet paper was bought in promotion, in 2018",
+                         PL_trips =  "Number of shopping trips where (at least one roll of) Private Label toilet paper was bought, in 2018",
+                         PromoSensitivity = "Grand mean-centered (across households); fraction of toilet paper rolls bought in promo (out of total number of rolls bought in 2018)", 
+                         PromoSensitivity_nonMC = "Fraction of toilet paper rolls bought in promo (out of total number of rolls bought in 2018)",
+                         Promo.sens_value = "Fraction of toilet paper budget spent on promo (out of total budget spent on toilet paper in 2018)",
+                         Promo.sens_value_MC = "Grand mean-centered (across households); fraction of toilet paper budget spent on promo (out of total budget spent on toilet paper in 2018)",
+                         Promo.sens_trip = "Fraction of toilet paper trips where (at least one roll of) toilet paper was bought in promo (out of all toilet paper trips in 2018)",
+                         Promo.sens_trip_MC = "Grand mean-centered (across households) ; Fraction of toilet paper trips where (at least one roll of) toilet paper was bought in promo (out of all toilet paper trips in 2018)",
+                         PLShare = "Grand mean-centered (across households); fraction of Private Label toilet paper rolls (out of total number of rolls bought in 2018)",
+                         PLShare_nonMC = "Fraction of Private Label toilet paper rolls (out of total number of rolls bought in 2018)",
+                         PL.share_value = "Fraction of toilet paper budget spent on Private Label (out of total budget spent on toilet paper in 2018)",
+                         PL.share_value_MC = "Grand mean-centered (across households) ; fraction of toilet paper budget spent on Private Label (out of total budget spent on toilet paper in 2018)",
+                         PL.share_trip = "Fraction of toilet paper trips where (at least one roll of) Private Label toilet paper was bought (out of all toilet paper trips in 2018)",
+                         PL.share_trip_MC = "Grand mean-centered (across households) ; fraction of toilet paper trips where (at least one roll of) Private Label toilet paper was bought (out of all toilet paper trips in 2018)",
+                         BrandLoyalty = "Grand mean-centered (across households); brand support measure of Knox & Walker (2001) calculated in 2018",
+                         BrandLoyalty_nonMC = "Brand support measure of Knox & Walker (2001) calculated in 2018",
+                         BrandSupport_std = "Rescaled BrandLoyalty variable, between 0 and 1",
+                         BrandSupport_std_MC = "Grand mean-centered (across households) ; rescaled BrandLoyalty variable, between 0 and 1",
+                         Average_IPT = "Grand mean-centered (across households) ; average number of days between two purchases in 2018", 
+                         Average_IPT_nonMC = "Average number of days between two purchases in 2018",
+                         Average_Q = "Grand mean-centered (across households) ; average number of toilet paper rolls bought during a toilet paper purchase in 2018", 
+                         Average_Q_nonMC = "Average number of toilet paper rolls bought during a toilet paper purchase in 2018",
+                         AvgInv = "Grand mean-centered (across households) ; average toilet paper inventory (in rolls) during 2019 (because 2018 initializes inventory model)", 
+                         AvgInv_MC = "Average toilet paper inventory (in rolls) during 2019 (because 2018 initializes inventory model)"
+                         )
+
+# save new version of dataframe, with labels 
+save(FullData, file=paste(project_path,"/R_files/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels.RData",sep=""))
+
+
+
+
+
+
+
+
+
+
+
+
+
+###################################################################################################################################################
+#                                                       RUNNING THE DIFFERENT MODELS
+###################################################################################################################################################
+
+
+#######################
+# loading prepared data
+#######################
+load(paste(project_path,"/R_files/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels.RData",sep=""))
+
+# final selection of relevant variables
+variables.keep <- c("Total_volume_sales",                                         # DV
+                    "PromoIndex", "PanicIndex",                                   # main variables under investigation
+                    "PromoSensitivity", "PLShare","BrandLoyalty",                 # gain-seeking moderators
+                    "HouseholdInventory", "Average_IPT", "Average_Q",             # loss-avoidance moderators
+                    "PriceIndex", "Age", "HouseholdSize", "Income",               # controls
+                    "Day_of_week", "Week", "Year",
+                    "Household", "Date")                                          # needed for clustering of st. err.
+FullData <- FullData[ , names(FullData) %in% variables.keep]
+# when no purchase that day -> make unconditional quantity zero
+FullData$unconditional_Total_volume_sales <- FullData$Total_volume_sales
+FullData$unconditional_Total_volume_sales[is.na(FullData$unconditional_Total_volume_sales)] <- 0
+
+
+### VARIANCE INFLATION FACTOR ###
+test_to_get_VIFs_tobit_selection <- glm(Total_volume_sales ~ PromoIndex + PanicIndex + HouseholdInventory + Average_IPT + PriceIndex + Age + 
+                          HouseholdSize + Income + Day_of_week + Week + Year, data = FullData)
+vif(test_to_get_VIFs_tobit_selection)
+test_to_get_VIFs_tobit_outcome <- glm(Total_volume_sales ~ PromoIndex + PanicIndex + HouseholdInventory + Average_Q + PriceIndex + Age + 
+                                          HouseholdSize + Income + Day_of_week + Week + Year, data = FullData)
+vif(test_to_get_VIFs_tobit_outcome)
+test_to_get_VIFs_ols <- glm(Total_volume_sales ~ PromoIndex + PanicIndex + PromoSensitivity + PLShare + BrandLoyalty + HouseholdInventory + Average_IPT + Average_Q + PriceIndex + Age + 
+                                HouseholdSize + Income + Day_of_week + Week + Year, data = FullData)
+vif(test_to_get_VIFs_ols)
+rm(test_to_get_VIFs_tobit_selection)
+rm(test_to_get_VIFs_tobit_outcome)
+rm(test_to_get_VIFs_ols)
+
+
+### CORRELATION MATRIX ###
+correlation_matrix <- round(cor(FullData[,c("PanicIndex","PromoIndex","PriceIndex", "HouseholdInventory", "Average_IPT", "Average_Q", "PromoSensitivity", "PLShare","BrandLoyalty",  
+                                            "Age", "HouseholdSize", "Income")]),5)
+stargazer(correlation_matrix, out = paste(project_path,"/R_Files/INC-QUANT model/toilet paper/Tables/correlation_matrix_July20.html", sep=""))
+
+### REPORTING OUTPUT FUNCTIONS ###
+two_stages_output <- function(heck, name){
+  heckman_both_stages <- heck
+  heckman_both_stages$param$index$betaO <- heck$param$index$betaS
+  heckman_both_stages$param$index$betaS <- heck$param$index$betaO
+  html_output <- stargazer(heck, heckman_both_stages, selection.equation = TRUE, dep.var.labels.include = F,        
+                           column.labels = c("Purchase incidence", "(Conditional) Purchase Quantity"), type="html",
+                           out = paste(project_path,"/R_Files/INC-QUANT model/toilet paper/Tables/",name,".html", sep=""))
+  return(html_output)
+}
+two_stages_output_clean <- function(heck, name, keep_list){
+  heckman_both_stages <- heck
+  heckman_both_stages$param$index$betaO <- heck$param$index$betaS
+  heckman_both_stages$param$index$betaS <- heck$param$index$betaO
+  html_output <- stargazer(heck, heckman_both_stages, selection.equation = TRUE, dep.var.labels.include = F,        
+                           column.labels = c("Purchase incidence", "(Conditional) Purchase Quantity"), type="html", keep=keep_list,
+                           add.lines = list(c("Observations", heck$param$nObs, heck$param$N1), c("Year FE", "yes", "yes"), c("Week of year FE", "yes", "yes"),  c("Day of week FE", "yes", "yes")), initial.zero = F, aling = T,
+                           out = paste(project_path,"/R_Files/INC-QUANT model/toilet paper/Tables/",name,".html", sep=""))
+  return(html_output)
+}
+fixed_effects_output <- function(fe, name) {
+  html_output <- stargazer(fe, dep.var.labels.include = F, column.labels = "Unconditional Purchase Quantity", type = "html",
+                           out = paste(project_path,"/R_Files/INC-QUANT model/toilet paper/Tables/",name,".html", sep=""))
+  return(html_output)
+}
+fixed_effects_output_clean <- function(fe, name, keep_list) {
+  html_output <- stargazer(fe, dep.var.labels.include = F, column.labels = "Unconditional Purchase Quantity", type = "html", keep=keep_list,
+                           add.lines = list(c("Household FE", "yes"), c("Year FE", "yes"), c("Week of year FE", "yes"),  c("Day of week FE", "yes"), c("Observations", length(FullData$unconditional_Total_volume_sales))),
+                           initial.zero = F, align = T, out = paste(project_path,"/R_Files/INC-QUANT model/toilet paper/Tables/",name,".html", sep=""))
+  return(html_output)
+}
+
+OLS_output_clean <- function(ols, name, keep_list) {
+  html_output <- stargazer(ols, dep.var.labels.include = F, column.labels = "Unconditional Purchase Quantity", type = "html", keep=keep_list,
+                           add.lines = list(c("Household FE", "no"), c("Year FE", "yes"), c("Week of year FE", "yes"),  c("Day of week FE", "yes"), c("Observations", length(FullData$unconditional_Total_volume_sales))),
+                           initial.zero = F, align = T, out = paste(project_path,"/R_Files/INC-QUANT model/toilet paper/Tables/",name,".html", sep=""))
+  return(html_output)
+}
+
+
+
+
+
+
+
+#################################
+# RQ1: PURCHASE - INCIDENCE MODEL
+#################################
+
+### TOBIT 2 - HECKMAN SELECTION MODEL ###
+# main effects only, including controls
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex 
+                                                                    + HouseholdInventory + Average_IPT 
+                                                                    + PriceIndex + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex 
+                                                                    + HouseholdInventory + Average_Q   
+                                                                    + PriceIndex + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+summary(heckman_main)
+
+
+# main effects only, including all characteristics as controls
+heckman_main_July <- selection(selection = !is.na(Total_volume_sales) ~   PanicIndex + PromoIndex + PriceIndex + 
+                          + HouseholdInventory + Average_IPT 
+                          + PromoSensitivity + PLShare + BrandLoyalty + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~   PanicIndex + PromoIndex + PriceIndex +
+                          + HouseholdInventory + Average_Q   
+                          + PromoSensitivity + PLShare + BrandLoyalty + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+
+
+summary(heckman_main_July)
+
+
+
+
+# save full output
+two_stages_output(heckman_main, "FinalModel_Study1_controls_Full")
+# clean version: excluding time fixed effects from output
+keep <- c("PromoIndex","PanicIndex","HouseholdInventory","Average_IPT","Average_Q", "PriceIndex", "Age", "HouseholdSize", "Income")
+# save clean output
+two_stages_output_clean(heckman_main, "FinalModel_Study1_2step_controls_Clean", keep)
+rm(heckman_main)
+
+
+
+### REPLICATE WITH FIXED EFFECTS MODEL ###
+# estimate fixed effects model with main effects only, including controls
+fe_main <- plm(unconditional_Total_volume_sales ~  PromoIndex + PanicIndex + 
+                                                   HouseholdInventory + Average_IPT + Average_Q + 
+                                                   PriceIndex + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                  data = FullData, index= c("Household", "Date"), model = "within")
+# cluster standard errors by household
+fe_main_clus <- coeftest(fe_main, vcov = vcovHC, type = "HC1", cluster= "group")
+# save output
+fixed_effects_output(fe_main_clus, "FinalModel_replicateStudy1_clustFE_controls_Full")
+# clean version: excluding time fixed effects from output
+modelmatrix <- model.matrix(fe_main)
+keep_main <- colnames(modelmatrix)
+rm(modelmatrix)
+keep_main <- keep_main[!grepl("Day",keep_main) & !grepl("Week",keep_main) & !grepl("Year",keep_main)]
+# save clean output
+fixed_effects_output_clean(fe_main_clus, "FinalModel_replicateStudy1_clustFE_controls_Clean", keep_main)
+
+
+
+summary.plm.full <- function (object, vcov = NULL, ...) 
+{
+  vcov_arg <- vcov
+  model <- plm:::describe(object, "model")
+  effect <- plm:::describe(object, "effect")
+  random.method <- plm:::describe(object, "random.method")
+  object$r.squared <- c(rsq = r.squared(object), 
+                        adjrsq = r.squared(object, dfcor = TRUE),
+                        # add the two new r squared terms here
+                        rsq_overall = r.squared(object, model = "pooled"),
+                        rsq_btw = r.squared(update(object, effect = "individual", model = "between")))
+  use.norm.chisq <- FALSE
+  if (model == "random") 
+    use.norm.chisq <- TRUE
+  if (length(formula(object))[2] >= 2) 
+    use.norm.chisq <- TRUE
+  if (model == "ht") 
+    use.norm.chisq <- TRUE
+  object$fstatistic <- pwaldtest(object, test = ifelse(use.norm.chisq, 
+                                                       "Chisq", "F"), vcov = vcov_arg)
+  if (!is.null(vcov_arg)) {
+    if (is.matrix(vcov_arg)) 
+      rvcov <- vcov_arg
+    if (is.function(vcov_arg)) 
+      rvcov <- vcov_arg(object)
+    std.err <- sqrt(diag(rvcov))
+  }
+  else {
+    std.err <- sqrt(diag(stats::vcov(object)))
+  }
+  b <- coefficients(object)
+  z <- b/std.err
+  p <- if (use.norm.chisq) {
+    2 * pnorm(abs(z), lower.tail = FALSE)
+  }
+  else {
+    2 * pt(abs(z), df = object$df.residual, lower.tail = FALSE)
+  }
+  object$coefficients <- cbind(b, std.err, z, p)
+  colnames(object$coefficients) <- if (use.norm.chisq) {
+    c("Estimate", "Std. Error", "z-value", "Pr(>|z|)")
+  }
+  else {
+    c("Estimate", "Std. Error", "t-value", "Pr(>|t|)")
+  }
+  if (!is.null(vcov_arg)) {
+    object$rvcov <- rvcov
+    rvcov.name <- paste0(deparse(substitute(vcov)))
+    attr(object$rvcov, which = "rvcov.name") <- rvcov.name
+  }
+  object$df <- c(length(b), object$df.residual, length(object$aliased))
+  class(object) <- c("summary.plm.full", "plm", "panelmodel")
+  object
+}
+
+test <- summary.plm.full(fe_main)
+# between
+test$r.squared[4]
+# overall
+test$r.squared[3]
+# within
+test$r.squared[1]
+# adjusted
+test$r.squared[2]
+# double-check within and adjusted
+summary(fe_main)$r.squared
+
+rm(fe_main)
+rm(fe_main_clus)
+
+
+
+
+
+
+
+### REPLICATE WITH LINEAR REGRESSION ###
+# estimate fixed effects model with main effects only, including controls
+ols <- lm(unconditional_Total_volume_sales ~  PromoIndex + PanicIndex + 
+                 HouseholdInventory + Average_IPT + Average_Q + 
+                 PriceIndex + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+               data = FullData)
+# clean version: excluding time fixed effects from output
+modelmatrix <- model.matrix(ols)
+keep_main <- colnames(modelmatrix)
+rm(modelmatrix)
+keep_main <- keep_main[!grepl("Day",keep_main) & !grepl("Week",keep_main) & !grepl("Year",keep_main)]
+# save clean output
+OLS_output_clean(ols, "FinalModel_replicateStudy1_simpleOLS_Clean", keep_main)
+
+
+rm(ols)
+
+
+
+
+
+
+
+
+
+
+
+
+##############################################
+# RQ2: FIXED EFFECTS MODEL WITH ALL MODERATORS
+##############################################
+
+### FIXED EFFECTS MODEL WITH DEMOGRAPHICS AS MODERATORS
+
+fe_mod <- plm(unconditional_Total_volume_sales ~  PromoIndex + PanicIndex + 
+                                                  # gain-seeking moderators
+                                                  PromoIndex*PromoSensitivity + PanicIndex*PromoSensitivity + 
+                                                  PromoIndex*PLShare + PanicIndex*PLShare + 
+                                                  PromoIndex*BrandLoyalty + PanicIndex*BrandLoyalty + 
+                                                  # loss avoidance moderators
+                                                  PromoIndex*Average_IPT + PanicIndex*Average_IPT + 
+                                                  PromoIndex*Average_Q + PanicIndex*Average_Q + 
+                                                  PromoIndex*HouseholdInventory + PanicIndex*HouseholdInventory +
+                                                  # demographics
+                                                  PromoIndex*Age + PanicIndex*Age + 
+                                                  PromoIndex*HouseholdSize + PanicIndex*HouseholdSize +
+                                                  PromoIndex*Income + PanicIndex*Income +
+                                                  # controls
+                                                  PriceIndex + Day_of_week + Week + Year,
+          data = FullData, index= c("Household", "Date"), model = "within")
+# variance-covariance matrix with clustered standard errors
+vcov_FE_clus <- vcovHC(fe_mod, type = "HC1", cluster = "group")
+# add clustered standard errors to model output
+fe_mod_clus <- coeftest(fe_mod, vcov = vcov_FE_clus)
+# save output
+fixed_effects_output(fe_mod_clus, "FinalModel_Study2_clustFE_demos_moderators_Full")
+# clean version: excluding time fixed effects from output
+modelmatrix <- model.matrix(fe_mod)
+keep_mod <- colnames(modelmatrix)
+rm(modelmatrix)
+keep_mod <- keep_mod[!grepl("Day",keep_mod) & !grepl("Week",keep_mod) & !grepl("Year",keep_mod)]
+# save clean output
+fixed_effects_output_clean(fe_mod_clus, "FinalModel_Study2_clustFE_demos_moderators_Clean", keep_mod)
+
+test <- summary.plm.full(fe_mod)
+# between
+test$r.squared[4]
+# overall
+test$r.squared[3]
+# within
+test$r.squared[1]
+# adjusted
+test$r.squared[2]
+# double-check within and adjusted
+summary(fe_mod)$r.squared
+
+
+
+
+### TESTING DIFFERENCE BETWEEN COEFFICIENTS
+
+### CHI SQUARED ###
+# gain-seeking moderators
+test_PromoSensitivity <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:PromoSensitivity = PanicIndex:PromoSensitivity")
+test_PLShare <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:PLShare = PanicIndex:PLShare")
+test_BrandLoyalty <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:BrandLoyalty = PanicIndex:BrandLoyalty")
+# loss avoidance moderators
+test_AverageIPT <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:Average_IPT = PanicIndex:Average_IPT")
+test_AverageQ <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:Average_Q = PanicIndex:Average_Q")
+test_HouseholdInventory <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:HouseholdInventory = PanicIndex:HouseholdInventory")
+# demographics
+test_Age <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:Age = PanicIndex:Age")
+test_HouseholdSize <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:HouseholdSize = PanicIndex:HouseholdSize")
+test_Income <- linearHypothesis(fe_mod_clus, vcov = vcov_FE_clus, "PromoIndex:Income = PanicIndex:Income")
+# turn into a list
+coefficient_testing_Chi <- list(test_PromoSensitivity, test_PLShare, test_BrandLoyalty, test_AverageIPT, test_AverageQ, test_HouseholdInventory, test_Age, test_HouseholdSize, test_Income)
+rm(list=ls(pattern="test_"))
+
+save(coefficient_testing_Chi, file=paste(project_path,"/R_files/INC-QUANT model/toilet paper/coefficient tests_Chi Squared",sep=""))
+
+
+
+
+
+
+
+
+#####################################################
+### RANDOM EFFECTS WITH CLUSTERED STANDARD ERRORS ###
+#####################################################
+re_mod <- plm(unconditional_Total_volume_sales ~  PromoIndex + PanicIndex + 
+                # gain-seeking moderators
+                PromoIndex*PromoSensitivity + PanicIndex*PromoSensitivity + 
+                PromoIndex*PLShare + PanicIndex*PLShare + 
+                PromoIndex*BrandLoyalty + PanicIndex*BrandLoyalty + 
+                # loss avoidance moderators
+                PromoIndex*Average_IPT + PanicIndex*Average_IPT + 
+                PromoIndex*Average_Q + PanicIndex*Average_Q + 
+                PromoIndex*HouseholdInventory + PanicIndex*HouseholdInventory +
+                # demographics
+                PromoIndex*Age + PanicIndex*Age + 
+                PromoIndex*HouseholdSize + PanicIndex*HouseholdSize +
+                PromoIndex*Income + PanicIndex*Income +
+                # controls
+                PriceIndex + Day_of_week + Week + Year,
+              data = FullData, index= c("Household", "Date"), model = "random")
+# variance-covariance matrix with clustered standard errors
+vcov_RE_clus <- vcovHC(re_mod, type = "HC1", cluster = "group")
+# add clustered standard errors to model output
+re_mod_clus <- coeftest(re_mod, vcov = vcov_RE_clus)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

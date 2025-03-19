@@ -6,17 +6,8 @@
 
 rm(list=ls())
 
-### Relative path setting - adapting to the operating computer
-getwd()
-if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
-  project_path <- "C:/Work at KU Leuven/Projects/RetailCOVID19"
-}else if (Sys.info()["nodename"] == "LAPTOP-KBL77S8J"){
-  project_path <- "C:/Users/lieve/Documents/GitHub/RetailCOVID19"
-}else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
-  project_path <- "C:/PhD KU Leuven/OneDrive - KU Leuven/Projects_Github/RetailCOVID19"
-}
-setwd(project_path)
-
+# set project_path
+project_path <- here::here()
 
 location <- "local"
 
@@ -69,7 +60,7 @@ all.dates <- seq(as.Date("2018-01-01"),as.Date("2020-12-31"),by="days")
 # loading prepared toilet paper purchase data
 #############################################
 
-load(paste(project_path,"/R_Files/INC-QUANT model/toilet paper/prepared_purchasedata_",country,sep=""))
+load(paste(project_path,"/INC-QUANT model/toilet paper/prepared_purchasedata_",country,sep=""))
 
 # setting observation and initialization period
 observation.dates <- seq(as.Date("2018-01-01"), as.Date("2020-05-01"), by="days")
@@ -254,7 +245,7 @@ rm(list=c('TP_purch','TP_purch_agg'))
 
 
 ### AVG INVENTORY ###
-load(paste(project_path,"/R_files/Preparation/toilet paper inventory/",country,"_INV_toiletpaper.RData",sep=""))
+load(paste(project_path,"/Preparation/toilet paper inventory/",country,"_INV_toiletpaper.RData",sep=""))
 dates_2019 <- seq(from=as.Date("2019-01-01"), to=as.Date("2019-12-31"), by="days")
 Inv <- Inv %>% group_by(ID) %>% summarize(AvgInv = mean(Inv[Date %in% dates_2019]))
 moderators <- merge(moderators, Inv, by.x="Panelist", by.y="ID")
@@ -339,10 +330,10 @@ table(moderators$Household_size)
 ####################################################################################
 
 # to ensure n is the same for all models
-load(paste(project_path,"/R_Files/INC-QUANT model/toilet paper/prepared_purchasedata_",country,sep=""))
+load(paste(project_path,"/INC-QUANT model/toilet paper/prepared_purchasedata_",country,sep=""))
 TP_purch <- TP_purch[!TP_purch$Panelist %in% excl.households, ]
-save(TP_purch, file=paste(project_path,"/R_files/INC-QUANT model/toilet paper/prepared_purchasedata_NL_final",sep=""))
+save(TP_purch, file=paste(project_path,"/INC-QUANT model/toilet paper/prepared_purchasedata_NL_final",sep=""))
 
 
 
-save(moderators, file=paste(project_path,"/R_files/INC-QUANT model/toilet paper/prepared_moderators_NL",sep=""))
+save(moderators, file=paste(project_path,"/INC-QUANT model/toilet paper/prepared_moderators_NL",sep=""))

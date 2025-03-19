@@ -6,17 +6,8 @@
 
 rm(list=ls())
 
-### Relative path setting - adapting to the operating computer
-getwd()
-if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
-  project_path <- "C:/Work at KU Leuven/Projects/RetailCOVID19"
-}else if (Sys.info()["nodename"] == "LAPTOP-KBL77S8J"){
-  project_path <- "C:/Users/lieve/Documents/GitHub/RetailCOVID19"
-}else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
-  project_path <- "C:/PhD KU Leuven/OneDrive - KU Leuven/Projects_Github/RetailCOVID19"
-}
-setwd(project_path)
-
+# set project_path
+project_path <- here::here()
 
 location <- "local"
 
@@ -61,7 +52,7 @@ country <- country_list[country_list=="NL"]
 all.dates <- seq(as.Date("2018-01-01"),as.Date("2020-12-31"),by="days")
 
 ### purchase data ###
-load(paste(project_path,"/R_files/Preparation/toilet paper/",country,"_purch_toiletpaper.RData",sep=""))
+load(paste(project_path,"/Preparation/toilet paper/",country,"_purch_toiletpaper.RData",sep=""))
 
 
 
@@ -170,6 +161,7 @@ row.names(final_chain_MS) <- seq_along(final_chain_MS$Banner_name)
 
 # select which ones to study individually
 chains.keep <- final_chain_MS$Banner_name[1:6]
+TP_purch$OG_Banner_name <- TP_purch$Banner_name
 TP_purch$Banner_name <- ifelse(TP_purch$Banner_name %in% chains.keep, as.character(TP_purch$Banner_name), "RestRetailer")
 
 rm(list=c("chain_MS","chain_MS_across_years","chain.info","final_chain_MS"))
@@ -746,10 +738,10 @@ rm(list=c('PricePromoIndex_201801', 'PricePromoIndex_201802', 'PricePromoIndex_2
 # save price and promotion index
 ################################
 
-save(final_PricePromoIndex, file=paste(project_path,"/R_files/INC-QUANT model/toilet paper/PricePromoIndex_NL.RData",sep=""))
+save(final_PricePromoIndex, file=paste(project_path,"/INC-QUANT model/toilet paper/PricePromoIndex_NL.RData",sep=""))
 
 
-save(TP_purch, file=paste(project_path,"/R_files/INC-QUANT model/toilet paper/prepared_purchasedata_NL",sep=""))
+save(TP_purch, file=paste(project_path,"/INC-QUANT model/toilet paper/prepared_purchasedata_NL",sep=""))
 
 
 

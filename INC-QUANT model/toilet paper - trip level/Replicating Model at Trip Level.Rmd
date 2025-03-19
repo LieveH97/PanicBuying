@@ -1,0 +1,119 @@
+---
+title: "inc_quant_toilet_paper"
+author: "Lieve Heyrman"
+date: '2024-05-13'
+output: html_document
+---
+
+```{r set up file}
+
+rm(list=ls())
+
+library(here)
+
+# set project_path
+project_path <- here::here()
+
+# set path to data files (depending on operating computer)
+location <- "local"
+if (location == "server") {
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data"
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data" }
+} else if (location == "local") { 
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- ""
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "C:/PhD KU Leuven/AiMark" } 
+}
+
+# load libraries
+list.of.packages <- c("tidyr","dplyr", "ggplot2", "tidyverse", "zoo", "readxl", "car", "sampleSelection", "stargazer", "haven","expss", "plm", "sandwich", "lmtest")
+# Install package if they are not installed yet
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+# Load packages
+invisible(lapply(list.of.packages, require, character.only = TRUE))
+
+# Suppress summarise info
+options(dplyr.summarise.inform = FALSE)
+
+options(scipen = 999)
+
+# create country list
+country_list <- c("NL","BE","GE","FR","UK")
+# set country
+country <- country_list[country_list=="NL"]
+
+```
+
+
+
+# LOADING THE TRIP-LEVEL DATA
+
+```{r loading the prepared dataset}
+
+load(paste(project_path,"/INC-QUANT model/toilet paper - trip level/FullData_TripLevel.RData",sep=""))
+
+```
+
+
+
+# REPLICATING MAIN MODEL AT TRIP LEVEL
+
+
+```{r replicating our model at trip level}
+
+library(modelsummary)
+
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex_1factor 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income 
+                                      + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex_1factor 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income 
+                                      + Day_of_week + Week + Year,
+                          data = Trips, method ="2step")
+modelsummary(heckman_main, shape = term ~ component + statistic, stars = T, statistic = c("std.error", "p.value"))
+
+rm(heckman_main)
+
+
+```
+
+
+
+# REPLICATING MODERATION MODEL AT TRIP LEVEL
+
+
+```{r replicating moderation model at trip level}
+
+
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PriceIndex + HouseholdInventory +
+                              PromoIndex*PromoSensitivity + PromoIndex*PLShare + PromoIndex*BrandLoyalty + 
+                              PanicIndex_1factor*PromoSensitivity + PanicIndex_1factor*PLShare + PanicIndex_1factor*BrandLoyalty + 
+                              PromoIndex*Average_IPT +
+                              PanicIndex_1factor*Average_IPT +
+                              PromoIndex*Age + PromoIndex*HouseholdSize + PromoIndex*Income +
+                              PanicIndex_1factor*Age + PanicIndex_1factor*HouseholdSize + PanicIndex_1factor*Income +
+                              Day_of_week + Week + Year,
+                            outcome =          Total_volume_sales  ~  PriceIndex + HouseholdInventory +
+                              PromoIndex*PromoSensitivity + PromoIndex*PLShare + PromoIndex*BrandLoyalty +
+                              PanicIndex_1factor*PromoSensitivity + PanicIndex_1factor*PLShare + PanicIndex_1factor*BrandLoyalty +
+                              PromoIndex*Average_Q +
+                              PanicIndex_1factor*Average_Q +
+                              PromoIndex*Age + PromoIndex*HouseholdSize + PromoIndex*Income +
+                              PanicIndex_1factor*Age + PanicIndex_1factor*HouseholdSize + PanicIndex_1factor*Income +
+                              Day_of_week + Week + Year,
+                          data = Trips, method ="2step")
+
+modelsummary(heckman_main, shape = term ~ component + statistic, stars = T, statistic = c("std.error", "p.value"))
+
+
+
+```

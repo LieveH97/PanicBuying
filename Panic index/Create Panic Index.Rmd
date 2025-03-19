@@ -1,0 +1,240 @@
+---
+title: "Create Panic Index"
+output: html_document
+---
+
+```{r setup}
+
+rm(list = ls())
+
+library(dplyr)
+library(psych)
+library(ggplot2)
+
+```
+
+
+
+```{r pooled factor analysis of five original keywords}
+
+### LOAD GOOGLE TRENDS DATA
+# read the data
+GoogleTrends <- read.csv("OG Keywords _ weekly.csv", sep = ",", skip = 1, col.names = c("Week", "hamsteren", "paniek", "voorraad", "supermarkt", "toiletpapier"))
+
+# the data is already scaled (to the biggest keyword; i.e. "toiletpapier"), so no scaling needed
+
+# replace any value of "<1" in any column with 0.5
+GoogleTrends[GoogleTrends == "<1"] <- 0.5
+
+# make all columns except "Week" numeric
+GoogleTrends[, -1] <- sapply(GoogleTrends[, -1], as.numeric)
+
+# we don't need Week for the factor analysis
+GoogleTrends_fa <- GoogleTrends[, -1]
+
+
+
+### FACTOR ANALYSIS
+
+# Pooled approach, assuming 1 factor
+fa <- fa(r = GoogleTrends_fa, nfactors = 1, rotate = "none", fm = "ml")
+summary(fa)
+fa$loadings
+rm(GoogleTrends_fa)
+
+# use the factor scores to create the panic index
+GoogleTrends$PanicIndex <- as.numeric(fa$scores)
+# rescale the panic index to values between 0 and 1
+GoogleTrends$PanicIndex <- (GoogleTrends$PanicIndex - min(GoogleTrends$PanicIndex)) / (max(GoogleTrends$PanicIndex) - min(GoogleTrends$PanicIndex))
+summary(GoogleTrends$PanicIndex)
+rm(fa)
+
+
+
+### COMPARE WITH ORIGINAL PANIC INDEX
+project_path <- here::here()
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels_new.RData",sep=""))
+FullData <- FullData %>% distinct(Date, PanicIndex)
+
+
+# make sure the dates are in the same format
+GoogleTrends$Week <- as.Date(GoogleTrends$Week, format = "%Y-%m-%d")
+# add the new panic index to the original data
+FullData <- FullData %>% left_join(GoogleTrends[,c("Week", "PanicIndex")], by = c("Date" = "Week"), suffix = c(".original", ".new")) %>% arrange(Date)
+# fill in the daily panic index with the weekly panic index
+FullData <- FullData %>% tidyr::fill(PanicIndex.new, .direction = "down")
+# for the first week:
+FullData <- FullData %>% tidyr::fill(PanicIndex.new, .direction = "up")
+
+# compare the two panic indices
+ggplot(FullData, aes(x = Date)) +
+  geom_line(aes(y = PanicIndex.original, color = "Original (Daily) Panic Index")) +
+  geom_line(aes(y = PanicIndex.new, color = "New (Weekly) Panic Index")) +
+  labs(x = "Date",
+       y = "Panic Index") +
+  scale_color_manual(values = c("Original (Daily) Panic Index" = "red", "New (Weekly) Panic Index" = "blue"))
+
+# the new panic index, imputed up to daily level:
+NewPanicIndex <- FullData[,c("Date", "PanicIndex.new")]
+
+
+
+### RERUN ANALYSIS WITH NEW PANIC INDEX
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels_new.RData",sep=""))
+FullData <- FullData %>% select(-PanicIndex) %>% left_join(NewPanicIndex, by = c("Date" = "Date"))
+# final selection of relevant variables
+variables.keep <- c("Total_volume_sales",                                         # DV
+                    "PromoIndex", "PanicIndex.new", "HouseholdInventory",             # main variables under investigation
+                    "PromoSensitivity", "PLShare","BrandLoyalty",                 # gain-seeking moderators
+                    "RestockInventory", "AvgInventoryLevel", "Average_IPT", "Average_Q",     # loss-avoidance moderators
+                    "PriceIndex", "Age", "HouseholdSize", "Income",               # controls
+                    "Day_of_week", "Week", "Year",
+                    "Household", "Date")                                          # needed for clustering of st. err.
+FullData <- FullData[ , names(FullData) %in% variables.keep]
+library(sampleSelection)
+library(modelsummary)
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex.new 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex.new 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+modelsummary(heckman_main, shape = term ~ component + statistic, stars = T, statistic = c("std.error", "p.value"))
+
+rm(heckman_main, FullData, NewPanicIndex, GoogleTrends)
+
+```
+
+
+```{r factor analysis of all keywords}
+
+
+
+### LOAD GOOGLE TRENDS DATA
+# read the data
+set1 <- read.csv("CombinedKeywords _ set 1.csv", sep = ",", skip = 1, col.names = c("Week", "hamsteren", "paniek", "voorraad", "toiletpapier", "lockdown"))
+set2 <- read.csv("CombinedKeywords _ set 2.csv", sep = ",", skip = 1, col.names = c("Week", "evenementen_afgelast", "scholen_dicht", "thuiswerken", "mondkapjes", "lockdown"))
+set3 <- read.csv("CombinedKeywords _ set 3.csv", sep = ",", skip = 1, col.names = c("Week", "vliegverbod", "bijeenkomsten", "horeca_dicht", "noodpakket", "lockdown"))
+set4 <- read.csv("CombinedKeywords _ set 4.csv", sep = ",", skip = 1, col.names = c("Week", "lockdown", "supermarkt"))
+GoogleTrends <- set1 %>% full_join(set2, by = c("Week", "lockdown")) %>% full_join(set3, by = c("Week", "lockdown")) %>% full_join(set4, by = c("Week", "lockdown"))
+rm(set1, set2, set3, set4)
+
+GoogleTrends <- GoogleTrends %>% select(Week, hamsteren, paniek, voorraad, toiletpapier, supermarkt, lockdown, mondkapjes, noodpakket)
+
+# the data is already scaled (to the biggest keyword; i.e. "lockdown"), so no scaling needed
+
+# replace any value of "<1" in any column with 0.5
+GoogleTrends[GoogleTrends == "<1"] <- 0.5
+
+# make all columns except "Week" numeric
+GoogleTrends[, -1] <- sapply(GoogleTrends[, -1], as.numeric)
+
+# we don't need Week for the factor analysis
+GoogleTrends_fa <- GoogleTrends[, -1]
+
+
+
+
+### FACTOR ANALYSIS
+
+fa.parallel(GoogleTrends_fa, fa = "fa", fm = "ml")    # this suggests 2 factors
+# check correlations
+round(cor(GoogleTrends_fa), 2)
+
+fa <- fa(r = GoogleTrends_fa, nfactors = 2, rotate = "none", fm = "ml")
+summary(fa)     # p-value > 0.05
+fa$loadings
+
+fa_1factor <- fa(r = GoogleTrends_fa, nfactors = 1, rotate = "none", fm = "ml")
+summary(fa_1factor)     # p-value > 0.05
+fa_1factor$loadings
+
+rm(GoogleTrends_fa)
+
+# use the factor scores of the first factor to create the panic index
+GoogleTrends$PanicIndex_2factors <- as.numeric(fa$scores[,1])
+GoogleTrends$PanicIndex_1factor <- as.numeric(fa_1factor$scores[,1])
+# rescale the panic index to values between 0 and 1
+GoogleTrends$PanicIndex_2factors <- (GoogleTrends$PanicIndex_2factors - min(GoogleTrends$PanicIndex_2factors)) / (max(GoogleTrends$PanicIndex_2factors) - min(GoogleTrends$PanicIndex_2factors))
+GoogleTrends$PanicIndex_1factor <- (GoogleTrends$PanicIndex_1factor - min(GoogleTrends$PanicIndex_1factor)) / (max(GoogleTrends$PanicIndex_1factor) - min(GoogleTrends$PanicIndex_1factor))
+summary(GoogleTrends$PanicIndex_2factors)
+summary(GoogleTrends$PanicIndex_1factor)
+rm(fa, fa_1factor)
+
+
+
+### COMPARE WITH ORIGINAL PANIC INDEX
+project_path <- here::here()
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels_new.RData",sep=""))
+FullData <- FullData %>% distinct(Date, PanicIndex)
+
+
+# make sure the dates are in the same format
+GoogleTrends$Week <- as.Date(GoogleTrends$Week, format = "%Y-%m-%d")
+# add the new panic index to the original data
+FullData <- FullData %>% left_join(GoogleTrends[,c("Week", "PanicIndex_2factors", "PanicIndex_1factor")], by = c("Date" = "Week")) %>% arrange(Date)
+# fill in the daily panic index with the weekly panic index
+FullData <- FullData %>% tidyr::fill(PanicIndex_2factors, .direction = "down")
+FullData <- FullData %>% tidyr::fill(PanicIndex_1factor, .direction = "down")
+# for the first week:
+FullData <- FullData %>% tidyr::fill(PanicIndex_2factors, .direction = "up")
+FullData <- FullData %>% tidyr::fill(PanicIndex_1factor, .direction = "up")
+
+# compare the two panic indices
+ggplot(FullData, aes(x = Date)) +
+  geom_line(aes(y = PanicIndex, color = "Original (Daily) Panic Index")) +
+  geom_line(aes(y = PanicIndex_1factor, color = "New (Weekly) Panic Index (FA with 1 factor)")) +
+  labs(x = "Date",
+       y = "Panic Index") +
+  scale_color_manual(values = c("Original (Daily) Panic Index" = "red", "New (Weekly) Panic Index (FA with 1 factor)" = "blue"))
+
+cor(FullData$PanicIndex, FullData$PanicIndex_1factor)
+
+
+# the new panic index, imputed up to daily level:
+NewPanicIndex <- FullData[,c("Date", "PanicIndex_1factor")]
+save(NewPanicIndex, file = paste(project_path,"/Panic Index/NewPanicIndex.RData",sep=""))
+
+
+```
+
+
+```{r estimate model with new panic index}
+
+
+
+### RERUN ANALYSIS WITH NEW PANIC INDEX
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels_new.RData",sep=""))
+FullData <- FullData %>% select(-PanicIndex) %>% left_join(NewPanicIndex, by = c("Date" = "Date"))
+# final selection of relevant variables
+variables.keep <- c("Total_volume_sales",                                         # DV
+                    "PromoIndex", "PanicIndex.new", "HouseholdInventory",             # main variables under investigation
+                    "PromoSensitivity", "PLShare","BrandLoyalty",                 # gain-seeking moderators
+                    "RestockInventory", "AvgInventoryLevel", "Average_IPT", "Average_Q",     # loss-avoidance moderators
+                    "PriceIndex", "Age", "HouseholdSize", "Income",               # controls
+                    "Day_of_week", "Week", "Year",
+                    "Household", "Date")                                          # needed for clustering of st. err.
+FullData <- FullData[ , names(FullData) %in% variables.keep]
+library(sampleSelection)
+library(modelsummary)
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex.new 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex.new 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+modelsummary(heckman_main, shape = term ~ component + statistic, stars = T, statistic = c("std.error", "p.value"))
+
+rm(heckman_main, FullData, NewPanicIndex, GoogleTrends)
+
+
+
+```

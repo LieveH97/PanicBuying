@@ -1,0 +1,268 @@
+---
+title: "Supply-side Concerns - GfK Questionnaire"
+author: "Lieve Heyrman"
+date: "2024-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r set up file}
+
+rm(list=ls())
+
+library(here)
+
+# set project_path
+project_path <- here::here()
+
+# set path to data files (depending on operating computer)
+location <- "local"
+if (location == "server") {
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data"
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data" }
+} else if (location == "local") { 
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- ""
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "C:/PhD KU Leuven/AiMark" } 
+}
+
+# load libraries
+list.of.packages <- c("plyr","tidyr","ggplot2", "tidyverse", "zoo", "readxl", "car", "sampleSelection", "stargazer", "haven","expss", "plm", "sandwich", "lmtest")
+# Install package if they are not installed yet
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+# Load packages
+lapply(list.of.packages, require, character.only = TRUE)
+
+# Suppress summarise info
+options(dplyr.summarise.inform = FALSE)
+
+options(scipen = 999)
+
+# create country list
+country_list <- c("NL","BE","GE","FR","UK")
+# set country
+country <- country_list[country_list=="NL"]
+
+```
+
+
+# GfK QUESTIONNAIRE: RESPONDENTS (CURRENTLY NOT IN MANUSCRIPT)
+
+Only a subset of our households participated in the GfK questionnaire. First, we run the main analysis on this subset of households, to see if our results are robust for this group.
+
+``` {r analysis on GfK respondents}
+
+# load prepared dataset
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels.RData",sep=""))
+# load households
+load(file=paste(project_path,"/Supply-side concerns/GfK-respondents",sep=""))
+
+# save households who did not fill in survey
+#non.respondents <- unique(FullData$Household)[!unique(FullData$Household) %in% GfKrespondents]
+#save(non.respondents, file = paste(project_path,"/R_files/INC-QUANT model/toilet paper/non-respondents", sep=""))
+
+# filter dataset
+FullData <- FullData[FullData$Household %in% GfKrespondents,]
+
+
+### TOBIT 2 - HECKMAN SELECTION MODEL ###
+# main model
+library(modelsummary)
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+modelsummary(heckman_main, shape = term ~ component + statistic, stars = T,
+             coef_map = c("(Intercept)" = "Intercept", "PanicIndex" = "Panic Index", "PromoIndex" = "Promo Index", "PriceIndex" = "Price Index", "HouseholdInventory" = "Household Inventory", "Average_IPT" = "Average IPT", "Average_Q" = "Average Q", "PromoSensitivity" = "Promo Sensitivity", "PLShare" = "PL Share", "BrandLoyalty" = "Brand Loyalty", "Age" = "Age", "HouseholdSize" = "Household Size", "Income" = "Income"), statistic = c("std.error", "p.value"))
+rm(heckman_main)
+
+```
+
+
+
+
+
+
+
+# GfK QUESTIONNAIRE: EXCLUDE HOUSEHOLDS WHO FOUND TOILET PAPER LESS AVAILABLE THAN BEFORE
+
+In GfK questionnaire: Q16-3 = "Now think about the categories you bought less often than before. Was this because they were not as readily available in the store as they were prior to the restrictions taking effect?"
+
+We run analysis on households who do not answer with "yes"
+
+```{r exclude households who found toilet paper less available}
+# load prepared dataset
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels.RData",sep=""))
+# load households
+load(file=paste(project_path, "/Supply-side concerns/Q16-3-exclude-less-available", sep=""))
+load(file = paste(project_path,"/INC-QUANT model/toilet paper/non-respondents", sep=""))
+# filter dataset
+FullData <- FullData[FullData$Household %in% `Q16-3-exclude-less-available` | FullData$Household %in% non.respondents,]
+
+### TOBIT 2 - HECKMAN SELECTION MODEL ###
+# main model
+library(modelsummary)
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+modelsummary(heckman_main, shape = term + statistic ~ component, stars = T,
+             #coef_map = c("(Intercept)" = "Intercept", "PanicIndex" = "Panic Index", "PromoIndex" = "Promo Index", "PriceIndex" = "Price Index", "HouseholdInventory" = "Household Inventory", "Average_IPT" = "Average IPT", "Average_Q" = "Average Q", "PromoSensitivity" = "Promo Sensitivity", "PLShare" = "PL Share", "BrandLoyalty" = "Brand Loyalty", "Age" = "Age", "HouseholdSize" = "Household Size", "Income" = "Income"), 
+             statistic = c("std.error", "p.value"))
+
+rm(heckman_main)
+
+```
+
+
+
+
+
+
+
+# GfK QUESTIONNAIRE: EXCLUDE HOUSEHOLDS WHO BOUGHT TOILET PAPER LESS THAN BEFORE (CURRENTLY NOT IN MANUSCRIPT)
+
+In GfK questionnaire: Q16-3 = "Now think about the categories you bought less often than before. Was this because they were not as readily available in the store as they were prior to the restrictions taking effect?"
+
+We run analysis on households who answered with NA (= households who do not buy toilet paper less often than before = Q15-3)
+
+
+```{r exclude households who bought toilet paper less often than before}
+
+# load prepared dataset
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels.RData",sep=""))
+
+# load households
+load(file=paste(project_path, "/Supply-side concerns/Q16-3-only-NAs", sep=""))
+load(file = paste(project_path,"/INC-QUANT model/toilet paper/non-respondents", sep=""))
+# filter dataset
+FullData <- FullData[FullData$Household %in% `Q16-3-only-NAs` | FullData$Household %in% non.respondents,]
+
+### TOBIT 2 - HECKMAN SELECTION MODEL ###
+# main model
+library(modelsummary)
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+modelsummary(heckman_main, shape = term + statistic ~ component, stars = T,
+             coef_map = c("(Intercept)" = "Intercept", "PanicIndex" = "Panic Index", "PromoIndex" = "Promo Index", "PriceIndex" = "Price Index", "HouseholdInventory" = "Household Inventory", "Average_IPT" = "Average IPT", "Average_Q" = "Average Q", "PromoSensitivity" = "Promo Sensitivity", "PLShare" = "PL Share", "BrandLoyalty" = "Brand Loyalty", "Age" = "Age", "HouseholdSize" = "Household Size", "Income" = "Income"), statistic = c("std.error", "p.value"))
+
+rm(heckman_main)
+```
+
+
+
+
+
+# GfK QUESTIONNAIRE: EXCLUDE HOUSEHOLDS WHO EXPERIENCED MORE OOS THAN USUAL
+
+In the GfK questionnaire: Q11A-7 = "I have to visit multiple stores because the products I need are sold out at the store I usually visit"
+We run analysis on households who did not answer with "more often"
+
+```{r exclude households who experienced more OOS than usual}
+
+# load prepared dataset
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels.RData",sep=""))
+
+# load households
+load(file=paste(project_path,"/Supply-side concerns/Q11A-7-exclude-more-often",sep=""))
+load(file = paste(project_path,"/INC-QUANT model/toilet paper/non-respondents", sep=""))
+# filter dataset
+FullData <- FullData[FullData$Household %in% `Q11A-7-exclude-more-often` | FullData$Household %in% non.respondents,]
+
+### TOBIT 2 - HECKMAN SELECTION MODEL ###
+# main model
+library(modelsummary)
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+modelsummary(heckman_main, shape = term + statistic ~ component, stars = T,
+             #coef_map = c("(Intercept)" = "Intercept", "PanicIndex" = "Panic Index", "PromoIndex" = "Promo Index", "PriceIndex" = "Price Index", "HouseholdInventory" = "Household Inventory", "Average_IPT" = "Average IPT", "Average_Q" = "Average Q", "PromoSensitivity" = "Promo Sensitivity", "PLShare" = "PL Share", "BrandLoyalty" = "Brand Loyalty", "Age" = "Age", "HouseholdSize" = "Household Size", "Income" = "Income"), 
+             statistic = c("std.error", "p.value"))
+
+rm(heckman_main)
+```
+
+
+
+# MULTISTORE SHOPPERS (CURRENTLY NOT IN MANUSCRIPT)
+
+One argument we make in the supply-side concerns, is that Dutch shoppers are mostly multistore shoppers. Therefore, they frequently visit multiple stores, so if they would be confronted with an empty shelf in one, they could just buy toilet paper in the other chain(s) they visit next.
+We run our analysis solely on multistore shoppers as a robustness check.
+
+
+```{r exclude single store shoppers}
+
+# load prepared dataset
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels.RData",sep=""))
+# load households
+load(file=paste(project_path, "/Supply-side concerns/Multistore_shoppers", sep=""))
+# filter dataset
+FullData <- FullData[FullData$Household %in% MultiStoreShopper,]
+
+### TOBIT 2 - HECKMAN SELECTION MODEL ###
+# main model
+library(modelsummary)
+# main effects only, including consumer characteristics as controls (not interacted)
+heckman_main <- selection(selection = !is.na(Total_volume_sales) ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_IPT + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          outcome =          Total_volume_sales  ~  PromoIndex + PanicIndex 
+                                      + HouseholdInventory + PriceIndex
+                                      + Average_Q + PromoSensitivity + PLShare + BrandLoyalty
+                                      + Age + HouseholdSize + Income + Day_of_week + Week + Year,
+                          data = FullData, method ="2step")
+modelsummary(heckman_main, shape = term + statistic ~ component, stars = T,
+             coef_map = c("(Intercept)" = "Intercept", "PanicIndex" = "Panic Index", "PromoIndex" = "Promo Index", "PriceIndex" = "Price Index", "HouseholdInventory" = "Household Inventory", "Average_IPT" = "Average IPT", "Average_Q" = "Average Q", "PromoSensitivity" = "Promo Sensitivity", "PLShare" = "PL Share", "BrandLoyalty" = "Brand Loyalty", "Age" = "Age", "HouseholdSize" = "Household Size", "Income" = "Income"), statistic = c("std.error", "p.value"))
+
+rm(heckman_main)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

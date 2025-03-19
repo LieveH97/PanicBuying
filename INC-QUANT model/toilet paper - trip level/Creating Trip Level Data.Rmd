@@ -1,0 +1,290 @@
+---
+title: "inc_quant_toilet_paper"
+author: "Lieve Heyrman"
+date: '2024-05-13'
+output: html_document
+---
+
+```{r set up file}
+
+rm(list=ls())
+
+library(here)
+
+# set project_path
+project_path <- here::here()
+
+# set path to data files (depending on operating computer)
+location <- "local"
+if (location == "server") {
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data"
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "X:/Retailing_Group_RawData/Hoarding data" }
+} else if (location == "local") { 
+  if (Sys.info()["nodename"] == "GHUM-L-E939DCHK"){
+    data_path <- ""
+  }else if (Sys.info()["nodename"] == "GHUM-L-E0376K0Q") {
+    data_path <- "C:/PhD KU Leuven/AiMark" } 
+}
+
+# load libraries
+list.of.packages <- c("tidyr","dplyr", "ggplot2", "tidyverse", "zoo", "readxl", "car", "sampleSelection", "stargazer", "haven","expss", "plm", "sandwich", "lmtest")
+# Install package if they are not installed yet
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+# Load packages
+invisible(lapply(list.of.packages, require, character.only = TRUE))
+
+# Suppress summarise info
+options(dplyr.summarise.inform = FALSE)
+
+options(scipen = 999)
+
+# create country list
+country_list <- c("NL","BE","GE","FR","UK")
+# set country
+country <- country_list[country_list=="NL"]
+
+```
+
+
+
+# LOADING THE HOUSEHOLDS IN ANALYSIS
+
+To construct a trip-level dataset, we need to go back to the raw data to retrieve the banner names for each trip.
+For memory, we want to do this solely for households in the analysis (= passed the filters).
+The easiest way to retrieve these is to load the prepared (day-level) dataset and get the Panelist IDs.
+
+```{r loading the prepared dataset}
+
+load(paste(project_path,"/INC-QUANT model/toilet paper/prepared_purchasedata_NL_final",sep=""))
+
+households <- unique(TP_purch$Panelist)
+
+rm(TP_purch)
+
+```
+
+
+
+
+# RETRIEVING TRIPS FROM RAW DATA
+
+We load the raw data and focus only on the households in the analysis. We then retrieve trips for these households.
+Note that we define a trip as a unique Panelist x Date x Banner combination.
+Note that we retain six retailers, in line with the original manuscript (where we used the retailers to define retailer-subbrand combinations). We group the other retailers into a RestRetailer group.
+
+
+``` {r retrieve trips from original sales data}
+
+# note that in our paper, we retain six retailers (Albert Heijn, Aldi, DIRK, Jumbo, Lidl, Plus)
+AlbertHeijn_formats <- c("Albert Heijn", "AH XL", "AH to Go", "Albert.nl")
+Jumbo_formats <- c("Jumbo", "Jumbo City", "Jumbo Foodmarkt")
+
+chains_keep <- c("Albert Heijn", "Aldi", "DIRK", "Jumbo", "Lidl", "Plus")
+
+
+### LOAD SALES DATA
+
+purch2018 <- read.csv(paste(data_path,"/",country,"/purchase_promo_2018.csv",sep=""))
+# filter on households of interest
+purch2018 <- purch2018 %>% filter(Panelist %in% households)
+## fixing Banner names
+purch2018$OG_Banner_name <- purch2018$Banner_name
+# fix Albert Heijn and Jumbo names
+purch2018$Banner_name[purch2018$Banner_name %in% AlbertHeijn_formats] <- "Albert Heijn"
+purch2018$Banner_name[purch2018$Banner_name %in% Jumbo_formats] <- "Jumbo"
+# group all non-focal chains into "RestRetailer"
+purch2018$Banner_name[!purch2018$Banner_name %in% chains_keep] <- "RestRetailer"
+# aggregate to trip level = unique Date - Retailer combination
+purch2018 <- purch2018 %>% distinct(Date_of_purchase, OG_Banner_name, Banner_name, Panelist)
+
+purch2019 <- read.csv(paste(data_path,"/",country,"/purchase_promo_2019.csv",sep=""))
+purch2019 <- purch2019 %>% filter(Panelist %in% households)
+purch2019$OG_Banner_name <- purch2019$Banner_name
+purch2019$Banner_name[purch2019$Banner_name %in% AlbertHeijn_formats] <- "Albert Heijn"
+purch2019$Banner_name[purch2019$Banner_name %in% Jumbo_formats] <- "Jumbo"
+purch2019$Banner_name[!purch2019$Banner_name %in% chains_keep] <- "RestRetailer"
+purch2019 <- purch2019 %>% distinct(Date_of_purchase, OG_Banner_name, Banner_name, Panelist)
+
+purch2020 <- read.csv(paste(data_path,"/",country,"/purchase_promo_2020.csv",sep=""))
+purch2020 <- purch2020 %>% filter(Panelist %in% households)
+purch2020$OG_Banner_name <- purch2020$Banner_name
+purch2020$Banner_name[purch2020$Banner_name %in% AlbertHeijn_formats] <- "Albert Heijn"
+purch2020$Banner_name[purch2020$Banner_name %in% Jumbo_formats] <- "Jumbo"
+purch2020$Banner_name[!purch2020$Banner_name %in% chains_keep] <- "RestRetailer"
+purch2020 <- purch2020 %>% distinct(Date_of_purchase, OG_Banner_name, Banner_name, Panelist)
+
+
+# combine all years
+Trips <- rbind(purch2018, purch2019, purch2020)
+Trips$Date_of_purchase <- as.Date(Trips$Date_of_purchase)
+
+rm(purch2018, purch2019, purch2020)
+
+
+
+# A trip is defined as a unique Household x Retailer x Date combination
+# We define Retailer as a Top 6 Retailer (Albert Heijn, Aldi, DIRK, Lidl, Jumbo, Lidl, Plus) or "RestRetailer"
+Trips <- Trips %>% distinct(Panelist, Date_of_purchase, Banner_name)
+
+```
+
+
+
+
+```{r descriptives on number of trips}
+
+# how many trips in total?
+nrow(Trips)
+
+# how many trips during estimation period?
+estimation.dates <- seq.Date(from=as.Date("2019-01-01"), to=as.Date("2020-04-30"), by="days")
+nrow(Trips %>% filter(Date_of_purchase %in% estimation.dates))
+
+```
+
+
+
+### ADDING TOILET PAPER PURCHASES
+
+We now add toilet paper purchases to the trips information. We load the toilet paper purchase data, as this is already cleaned (e.g. Brand-SubBrand-Retailer variable is created, number of rolls is standardized).
+
+```{r adding information on toilet paper purchases}
+
+# loading the toilet paper purchase data
+load(paste(project_path,"/INC-QUANT model/toilet paper/prepared_purchasedata_NL_final",sep=""))
+# for now (without Brand Choice model), aggregate to trip level
+TP_purch <- TP_purch %>% group_by(Panelist, Date_of_purchase, Banner_name) %>% dplyr::summarise(Total_volume_sales = sum(Total_volume_sales))
+# add TP information to the Trips
+Trips <- Trips %>% left_join(TP_purch, by = c("Panelist", "Date_of_purchase", "Banner_name"))
+rm(TP_purch)
+```
+
+
+```{r descriptives on trips with toilet paper purchase}
+
+# how many trips  WITH A TOILET PAPER PURCHASE in total?
+nrow(Trips %>% filter(!is.na(Total_volume_sales)))
+# how many trips  WITH A TOILET PAPER PURCHASE in estimation period?
+nrow(Trips %>% filter(!is.na(Total_volume_sales)) %>% filter(Date_of_purchase %in% estimation.dates))
+
+```
+
+
+### MODEL-FREE EVIDENCE
+
+In the manuscript, we calculate the percentage of High (vs. Low) Panic Days when a households makes a purchase, as well as how many rolls they buy on an average High (vs. Low) Panic Day. We recreate these statistics with data on the trip level.
+
+
+```{r model-free evidence}
+
+# to split between high and low panic days: add panic index from full dataset
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels_new.RData",sep=""))
+FullData <- FullData %>% select(Household, Date, PanicIndex)
+Trips <- Trips %>% left_join(FullData, by = c("Panelist" = "Household", "Date_of_purchase" = "Date"))
+rm(FullData)
+
+
+## MODEL-FREE EVIDENCE ON INCIDENCE
+
+# we focus on 2020 data.
+Trips2020 <- Trips %>% filter(Date_of_purchase %in% seq.Date(from=as.Date("2020-01-01"), to=as.Date("2020-04-30"), by="days"))
+# split between high and low panic days: 
+median_panic <- median(Trips2020 %>% ungroup() %>% distinct(Date_of_purchase, PanicIndex) %>% pull(PanicIndex), na.rm = TRUE)
+Trips2020$Panic <- ifelse(Trips2020$PanicIndex > median_panic, "HighPanic", "LowPanic")
+# in general: how many high and low panic days are there?
+nHighPanicDays <- length(unique(Trips2020$Date_of_purchase[Trips2020$Panic == "HighPanic"]))
+nLowPanicDays <- length(unique(Trips2020$Date_of_purchase[Trips2020$Panic == "LowPanic"]))
+
+# For each household, calculate: (i) number of trips on High (Low) Panic days, (ii) number of trips with toilet paper purchase on High (Low) Panic days
+temp <- Trips2020 %>% group_by(Panelist) %>% summarize(
+  nTrips_highpanic = sum(Panic == "HighPanic"), nTrips_lowpanic = sum(Panic == "LowPanic"),
+  nTrips_highpanic_toiletpaper = sum(Panic == "HighPanic" & !is.na(Total_volume_sales)), nTrips_lowpanic_toiletpaper = sum(Panic == "LowPanic" & !is.na(Total_volume_sales)))
+
+# on average, a household makes a shopping trip on ...% of high panic days
+# on average, a household makes a shopping trip on ...% of low panic days
+mean(temp$nTrips_highpanic / nHighPanicDays)
+mean(temp$nTrips_lowpanic / nLowPanicDays)
+
+# on average, a household buys toilet paper on ...% of high panic days
+# on average, a household buys toilet paper on ...% of low panic days
+mean(temp$nTrips_highpanic_toiletpaper / nHighPanicDays)
+mean(temp$nTrips_lowpanic_toiletpaper / nLowPanicDays)
+
+# on average, a household buys toilet paper on ...% of high panic SHOPPING TRIPS
+# on average, a household buys toilet paper on ...% of low panic SHOPPING TRIPS
+mean(temp$nTrips_highpanic_toiletpaper[temp$nTrips_highpanic != 0] / temp$nTrips_highpanic[temp$nTrips_highpanic != 0])
+mean(temp$nTrips_lowpanic_toiletpaper[temp$nTrips_lowpanic != 0] / temp$nTrips_lowpanic[temp$nTrips_lowpanic != 0])
+
+rm(temp)
+
+
+
+## MODEL-FREE EVIDENCE ON QUANTITY
+
+# re-aggregate to trip level (because of RestRetailer, sometimes multiple trips at RestRetailer per day)
+Trips2020 <- Trips %>% filter(Date_of_purchase %in% seq.Date(from=as.Date("2020-01-01"), to=as.Date("2020-04-30"), by="days"))
+# split between high and low panic days: 
+Trips2020$Panic <- ifelse(Trips2020$PanicIndex > median_panic, "HighPanic", "LowPanic")
+
+# For each household, calculate number of toilet paper rolls bought per trip --> already done when re-aggregating
+mean(Trips2020$Total_volume_sales[Trips2020$Panic == "HighPanic"], na.rm = T)
+mean(Trips2020$Total_volume_sales[Trips2020$Panic == "LowPanic"], na.rm = T)
+
+rm(Trips2020)
+
+```
+
+
+
+
+### CREATING FULL DATASET WITH TRIPS
+
+```{r creating full dataset with trips}
+
+Trips <- Trips %>% filter(Date_of_purchase %in% estimation.dates)
+Trips <- Trips %>% group_by(Panelist, Date_of_purchase, Banner_name, PanicIndex) %>% summarize(Total_volume_sales = sum(Total_volume_sales))
+
+
+
+# ADDING INDEPENDENT VARIABLES OF THE MODEL
+
+load(paste(project_path,"/INC-QUANT model/toilet paper/FullData_with_moderators_and_labels_new.RData",sep=""))
+Trips <- Trips %>% left_join(FullData[,c("Household", "Date", "PromoIndex", "HouseholdInventory", "PromoSensitivity", "PLShare", "BrandLoyalty", "RestockInventory", "AvgInventoryLevel", "Average_IPT", "Average_Q","PriceIndex", "Age", "HouseholdSize", "Income", "Day_of_week", "Week", "Year")], by = c("Panelist" = "Household", "Date_of_purchase" = "Date"))
+rm(FullData)
+
+
+
+# ADDING CONTINGENCY INDEX AS CONTROL
+
+policytracker <- read_xlsx(paste("C:/PhD KU Leuven/AiMark/Government policy tracker/OxCGRT_timeseries_all_v1.xlsx"), sheet = "StringencyIndex")
+policytracker <- policytracker %>% filter(CountryName == "Netherlands") %>% select(- c(CountryCode, CountryName, RegionCode, RegionName, CityCode, CityName, Jurisdiction))
+policytracker <- data.frame(Date = colnames(policytracker), StringencyIndex = as.numeric(policytracker[1,]))
+policytracker$Date <- as.Date(policytracker$Date, format = "%d%b%Y")
+
+Trips <- Trips %>% left_join(policytracker, by = c("Date_of_purchase" = "Date"))
+# if the value is missing (= in 2019), the stringency is zero
+Trips$StringencyIndex[is.na(Trips$StringencyIndex)] <- 0
+# the stringency index is constructed as values between 0 and 100 -> divide by 100
+Trips$StringencyIndex <- Trips$StringencyIndex / 100
+rm(policytracker)
+
+
+
+# ADDING THE NEW PANIC INDEX
+
+load(paste(project_path,"/Panic index/NewPanicIndex.RData",sep=""))
+Trips <- Trips %>% left_join(NewPanicIndex, by = c("Date_of_purchase" = "Date"))
+rm(NewPanicIndex)
+
+
+
+# SAVE THE PREPARED DATASET
+
+save(Trips, file = paste(project_path,"/INC-QUANT model/toilet paper - trip level/FullData_TripLevel.RData",sep=""))
+
+```
+
+
